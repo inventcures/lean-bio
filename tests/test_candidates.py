@@ -71,7 +71,7 @@ def test_file_sink_roundtrip(tmp_path):
 def test_lean_emission_has_conservation_theorem():
     model = parse_file(EXAMPLE)
     lean = emit_lean(model)
-    assert "namespace BSL.EnzymeKinetics" in lean
+    assert "namespace BSL.«EnzymeKinetics»" in lean
     assert "def dXdt" in lean
-    assert "theorem enzyme_conservation" in lean
+    assert "theorem «enzyme_conservation»" in lean
     assert "ring" in lean

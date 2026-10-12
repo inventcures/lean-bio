@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 from .nodes import Model, exact
+from .lean.names import user, internal, comment
 
 
 class Unsupported(Exception):
@@ -122,33 +123,37 @@ def _lit(x: Fraction) -> str:
 def emit_lean_instance(model: Model, p: ReversiblePattern | None = None) -> str:
     p = p or classify(model)
     a_lo, a_hi, b_lo, b_hi = certified_bounds(p)
-    A, B = p.sp_a, p.sp_b
+    # User names are «escaped»; emitter binders end in `'`, which no BSL name
+    # can contain, so a species named `kf` cannot shadow the rate constant.
+    A, B = user(p.sp_a), user(p.sp_b)
+    kf, kr = internal("kf"), internal("kr")
     M = _lit(p.M)
+    hyps = "hkf_lo' hkf_hi' hkr_lo' hkr_hi'"
     L = [
         "import Mathlib",
         "",
-        f"/- Auto-generated from {model.source.name} by `bsl certify`. -/",
+        f"/- Auto-generated from {comment(model.source.name)} by `bsl certify`. -/",
         "/- Instance of the verified reversible two-species mass-action schema",
         "   (see BslLean.ReversibleTwoSpecies). Kernel-checked in CI. -/",
-        f"namespace BSL.Generated.{model.name}",
+        f"namespace BSL.Generated.{user(model.name)}",
         "",
-        f"theorem steady_state_bounds (kf kr {A} {B} : ℝ)",
-        f"    (hkf_lo : {_lit(p.kf_lo)} ≤ kf) (hkf_hi : kf ≤ {_lit(p.kf_hi)})",
-        f"    (hkr_lo : {_lit(p.kr_lo)} ≤ kr) (hkr_hi : kr ≤ {_lit(p.kr_hi)})",
-        f"    (hmass : {A} + {B} = {M})",
-        f"    (hss : kf * {A} = kr * {B}) :",
+        f"theorem steady_state_bounds ({kf} {kr} {A} {B} : ℝ)",
+        f"    (hkf_lo' : {_lit(p.kf_lo)} ≤ {kf}) (hkf_hi' : {kf} ≤ {_lit(p.kf_hi)})",
+        f"    (hkr_lo' : {_lit(p.kr_lo)} ≤ {kr}) (hkr_hi' : {kr} ≤ {_lit(p.kr_hi)})",
+        f"    (hmass' : {A} + {B} = {M})",
+        f"    (hss' : {kf} * {A} = {kr} * {B}) :",
         f"    {_lit(a_lo)} ≤ {A} ∧ {A} ≤ {_lit(a_hi)} ∧ "
         f"{_lit(b_lo)} ≤ {B} ∧ {B} ≤ {_lit(b_hi)} := by",
-        "  have hpos : 0 < kf + kr := by linarith",
-        f"  have hsum : (kf + kr) * {A} = {M} * kr := by "
-        f"linear_combination hss + kr * hmass",
-        f"  have hAlo : {_lit(a_lo)} ≤ {A} := by "
-        f"nlinarith [hsum, hpos, hkf_lo, hkf_hi, hkr_lo, hkr_hi]",
-        f"  have hAhi : {A} ≤ {_lit(a_hi)} := by "
-        f"nlinarith [hsum, hpos, hkf_lo, hkf_hi, hkr_lo, hkr_hi]",
-        "  refine ⟨hAlo, hAhi, ?_, ?_⟩ <;> linarith",
+        f"  have hpos' : 0 < {kf} + {kr} := by linarith",
+        f"  have hsum' : ({kf} + {kr}) * {A} = {M} * {kr} := by "
+        f"linear_combination hss' + {kr} * hmass'",
+        f"  have hAlo' : {_lit(a_lo)} ≤ {A} := by "
+        f"nlinarith [hsum', hpos', {hyps.replace(' ', ', ')}]",
+        f"  have hAhi' : {A} ≤ {_lit(a_hi)} := by "
+        f"nlinarith [hsum', hpos', {hyps.replace(' ', ', ')}]",
+        "  refine ⟨hAlo', hAhi', ?_, ?_⟩ <;> linarith",
         "",
-        f"end BSL.Generated.{model.name}",
+        f"end BSL.Generated.{user(model.name)}",
         "",
     ]
     return "\n".join(L)

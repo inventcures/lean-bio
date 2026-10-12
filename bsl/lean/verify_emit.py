@@ -22,6 +22,9 @@ from math import gcd
 
 from .emit import _net
 from ..nodes import Model, Invariant, FluxProperty, exact
+from .names import user, internal, comment
+
+D = internal("d")   # common denominator of a homogenized flux vector
 
 
 def _is_int(x: float) -> bool:
@@ -101,7 +104,7 @@ def obligation(model: Model, inv: Invariant) -> dict:
     flux_vars = " ".join(f"v_{r.name}" for r in relevant)
     sig = f" ({flux_vars} : Int)" if relevant else ""
     body = (
-        f"theorem {inv.name}{sig} :\n"
+        f"theorem {user(inv.name)}{sig} :\n"
         f"    {lhs} = 0 := by\n"
         f"  omega"
     )
@@ -125,7 +128,7 @@ def _lin(coeffs: dict, rel: str, d_coeff: Fraction) -> str:
     L = _lcm_den(list(coeffs.values()) + [d_coeff])
     lhs = _join_plus([_term(int(c * L), v) for v, c in coeffs.items() if c != 0])
     k = int(d_coeff * L)
-    rhs = "0" if k == 0 else _term(k, "d")
+    rhs = "0" if k == 0 else _term(k, D)
     return f"{lhs} {rel} {rhs}"
 
 
@@ -154,7 +157,7 @@ def _steady_state_obligation(model: Model, prop: FluxProperty) -> dict:
     claim = (f"flux({prop.reaction}) in "
              f"[{_int_or_float(prop.lo)}, {_int_or_float(prop.hi)}] at steady state")
 
-    hyps: list[tuple[str, str]] = [("hd", "0 < d")]
+    hyps: list[tuple[str, str]] = [(internal("hd"), f"0 < {D}")]
     for s in model.species:
         coeffs = {f"v_{r.name}": _net(r, s.name) for r in model.reactions}
         if any(c != 0 for c in coeffs.values()):
@@ -173,8 +176,8 @@ def _steady_state_obligation(model: Model, prop: FluxProperty) -> dict:
     goal = f"{_lin(t, '≥', lo)} ∧ {_lin(t, '≤', hi)}"
     flux_vars = " ".join(f"v_{r.name}" for r in model.reactions)
     body = (
-        f"-- Homogenized over ℚ: real fluxes are v_r / d (see verify_emit.py).\n"
-        f"theorem {prop.name} (d {flux_vars} : Int)"
+        f"-- Homogenized over ℚ: real fluxes are v_r / d' (see verify_emit.py).\n"
+        f"theorem {user(prop.name)} ({D} {flux_vars} : Int)"
         + "".join(f"\n    ({hn} : {ln})" for hn, ln in hyps)
         + f" :\n    {goal} := by\n  omega"
     )
@@ -189,15 +192,15 @@ def emit_verification(model: Model) -> tuple[str, list[dict]]:
         obligations += [_steady_state_obligation(model, p)
                         for p in model.properties]
     L: list[str] = []
-    L.append(f"/- Auto-generated conservation obligations for {model.name} "
+    L.append(f"/- Auto-generated conservation obligations for {comment(model.name)} "
              f"by GSK-LeanBio. -/")
     L.append("/- Flux-abstract stoichiometric conservation, checked by `omega` "
              "(Lean core, no Mathlib). -/")
-    L.append(f"namespace BSL.{model.name}.Verify")
+    L.append(f"namespace BSL.{user(model.name)}.Verify")
     L.append("")
     for ob in obligations:
         L.append(ob["lean"])
         L.append("")
-    L.append(f"end BSL.{model.name}.Verify")
+    L.append(f"end BSL.{user(model.name)}.Verify")
     L.append("")
     return "\n".join(L), obligations

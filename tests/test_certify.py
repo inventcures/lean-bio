@@ -28,9 +28,9 @@ def test_emitted_instance_is_flagship_shaped():
     m = parse_file(EX / "E-reversible" / "model.bsl")
     lean = emit_lean_instance(m)
     assert "theorem steady_state_bounds" in lean
-    assert "linear_combination hss + kr * hmass" in lean
+    assert "linear_combination hss' + kr' * hmass'" in lean
     assert "nlinarith" in lean
-    assert "6 ≤ A ∧ A ≤ 8 ∧ 2 ≤ B ∧ B ≤ 4" in lean
+    assert "6 ≤ «A» ∧ «A» ≤ 8 ∧ 2 ≤ «B» ∧ «B» ≤ 4" in lean
     assert "sorry" not in lean
 
 
@@ -136,3 +136,20 @@ def test_huge_bound_does_not_crash():
     p = classify(parse(_rev(("1.0", "1e400"), ("3.0", "4.0"), "10.0")))
     assert p.kf_hi == 10**400
     emit_lean_instance(parse(_rev(("1.0", "1e400"), ("3.0", "4.0"), "10.0")), p)
+
+
+def test_species_named_like_binders_cannot_shadow_them():
+    # Species `kr`/`kf` used to shadow the rate-constant binders, turning
+    # `hss` into `kf * kr = kr * kf` and the hypotheses into a contradiction.
+    src = """model Shadow {
+      species kr @init 6.0
+      species kf @init 4.0
+      reaction forward : kr -> kf @mass_action(p)
+      reaction reverse : kf -> kr @mass_action(q)
+      param p in [1.0, 2.0] @assumed
+      param q in [3.0, 4.0] @assumed
+      invariant total : kr + kf = 10.0
+    }"""
+    lean = emit_lean_instance(parse(src))
+    assert "(kf' kr' «kr» «kf» : ℝ)" in lean
+    assert "(hss' : kf' * «kr» = kr' * «kf»)" in lean

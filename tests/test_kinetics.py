@@ -59,10 +59,10 @@ def test_rate_law_arity_checked():
 def test_mm_lean_flux():
     m = parse_file(EX / "B-michaelis-menten" / "model.bsl")
     lean = emit_lean(m)
-    assert "p.vmax * x S / (p.km + x S)" in lean
+    assert "p'.«vmax» * x' «S» / (p'.«km» + x' «S»)" in lean
 
 
 def test_hill_lean_flux():
     m = parse_file(EX / "C-hill" / "model.bsl")
     lean = emit_lean(m)
-    assert "x R ^ 2" in lean
+    assert "x' «R» ^ 2" in lean

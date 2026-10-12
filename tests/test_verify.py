@@ -14,8 +14,8 @@ needs_lean = pytest.mark.skipif(LEAN_MISSING, reason="no Lean toolchain availabl
 def test_emit_obligation_needs_no_lean():
     m = parse_file(EX / "A-enzyme-kinetics" / "model.bsl")
     src, obs = emit_verification(m)
-    assert "namespace BSL.EnzymeKinetics.Verify" in src
-    assert "theorem enzyme_conservation" in src
+    assert "namespace BSL.«EnzymeKinetics».Verify" in src
+    assert "theorem «enzyme_conservation»" in src
     assert "omega" in src
     assert len(obs) == 1 and obs[0]["integer_ok"]
 
@@ -54,3 +54,18 @@ def test_verify_refutes_false_invariant(tmp_path):
     journal, _ = run_verification(parse(src), tmp_path)
     assert journal["result"] == "failed"
     assert journal["obligations"][0]["status"] == "failed"
+
+
+@needs_lean
+def test_lean_keyword_names_compile(tmp_path):
+    # An invariant named `end` used to be a Lean parse error, reported as a
+    # refuted conservation law.
+    src = """model end {
+      species fun @init 1.0
+      species at @init 0.0
+      reaction by : fun -> at @mass_action(k)
+      param k in [1.0, 2.0] @assumed
+      invariant end : fun + at = 1.0
+    }"""
+    journal, _ = run_verification(parse(src), tmp_path)
+    assert journal["result"] == "verified", journal
