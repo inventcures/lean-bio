@@ -1,13 +1,26 @@
 name: lean-flagship
 
-# Kernel-checks the parameter-bounded steady-state flagship proof (lean/) against
-# Mathlib. GitHub-hosted runners have open network, so Mathlib's prebuilt .olean
-# cache resolves here even though it is firewalled in the dev sandbox.
+# Kernel-checks the Lean side (lean/) against Mathlib, audits axioms, checks
+# that committed certificates match what `bsl certify` generates, and runs the
+# kernel-backed Python tests. GitHub-hosted runners can reach Mathlib's
+# prebuilt .olean cache.
 
 on:
   push:
     paths:
       - "lean/**"
+      - "bsl/**"
+      - "examples/**"
+      - "scripts/**"
+      - "tests/**"
+      - ".github/workflows/lean.yml"
+  pull_request:
+    paths:
+      - "lean/**"
+      - "bsl/**"
+      - "examples/**"
+      - "scripts/**"
+      - "tests/**"
       - ".github/workflows/lean.yml"
   workflow_dispatch:
 
@@ -16,22 +29,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Install elan (Lean toolchain manager)
         run: |
           curl -fsSL https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
-      - name: Resolve deps, fetch Mathlib cache, build (kernel-checks the proof)
+      - name: Fetch Mathlib cache (pinned by lake-manifest.json), build
         working-directory: lean
         run: |
-          lake update
           lake exe cache get
           lake build
 
-      - name: Confirm the proof object was produced and is sorry-free
-        working-directory: lean
+      - name: Committed certificates match the generator
         run: |
-          test -f .lake/build/lib/lean/BslLean/ReversibleTwoSpecies.olean
-          ! grep -RnE '\b(sorry|admit)\b' BslLean/ || (echo "found sorry/admit" && exit 1)
-          echo "kernel-checked: BslLean.ReversibleTwoSpecies"
+          python -m pip install -e ".[dev]"
+          python -m bsl certify examples/E-reversible/model.bsl --no-check \
+            --lean-out lean/BslLean/Generated || test $? -eq 4
+          git diff --exit-code lean/BslLean/Generated
+
+      - name: Axiom audit (no sorry, no custom axioms, no native_decide)
+        run: |
+          python scripts/audit_axioms.py lean BslLean \
+            BSL.ReversibleTwoSpecies.schema \
+            BSL.ReversibleTwoSpecies.steady_state_bounds \
+            BSL.ReversibleTwoSpecies.isSteadyState_iff \
+            'BSL.Generated.«ReversibleAB».steady_state_bounds'
+
+      - name: Kernel-backed tests (certify, verify)
+        env:
+          BSL_LEAN_PROJECT: ${{ github.workspace }}/lean
+        run: |
+          export BSL_LEAN="$(cd lean && elan which lean)"
+          export BSL_LAKE="$(cd lean && elan which lake)"
+          python -m pytest -q -rs
+          python -m bsl certify examples/E-reversible/model.bsl

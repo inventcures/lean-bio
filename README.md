@@ -57,8 +57,10 @@ python -m bsl certify examples/E-reversible/model.bsl --lean-out lean/BslLean/Ge
 ```
 
 The ℝ-valued flagship is kernel-checked on every push by GitHub Actions
-(`lake exe cache get` → `lake build`, asserting the `.olean` is produced and the
-source is `sorry`-free). Click the badge; read the log. That is the standard:
+(`lake exe cache get` → `lake build` against the committed `lake-manifest.json`),
+followed by a `#print axioms` audit (standard axioms only: no `sorry`, no custom
+`axiom`, no `native_decide`), a check that the committed certificates are exactly
+what `bsl certify` generates, and the kernel-backed test suite. Click the badge; read the log. That is the standard:
 not "trust me," but "run it."
 
 ## How it works
