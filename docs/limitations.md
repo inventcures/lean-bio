@@ -54,8 +54,11 @@ Not yet:
   → `lake build`), because GitHub-hosted runners can reach Mathlib's prebuilt
   `.olean` cache. In the restricted dev sandbox that cache is firewalled (HTTP
   403 on every object) and a from-source build is hours of compute, so this proof
-  is **not** kernel-checked there — the CI run is the authority. The `bsl lean`
-  output (the ℝ-valued vector field) remains emit-only.
+  is **not** kernel-checked there — the CI run is the authority. The general
+  theorem `schema` covers every box of positive rate constants and is proved
+  from the vector field (`IsSteadyState`), not from a hand-written equation.
+  The `bsl lean` output (the ℝ-valued vector field for any model) is not
+  checked by any CLI command; it compiles against Mathlib for all examples.
 - **Sealing** candidates into a signed Genesis shard. The `GenesisEmitter`
   adapter is a stub that docks the AXM kernel when it is installed.
 - **PK/PD** compartment models and **Boolean** networks.

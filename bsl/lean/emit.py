@@ -115,7 +115,7 @@ def emit_lean(model: Model) -> str:
         L.append(f"  {user(p.name + '_hi')} : {P}.{user(p.name)} ≤ {_fmt(p.hi)}")
     L.append("")
     L.append("/-- Mass-action vector field  dX/dt. -/")
-    L.append(f"def dXdt ({P} : Params) ({X} : Species → ℝ) : Species → ℝ")
+    L.append(f"noncomputable def dXdt ({P} : Params) ({X} : Species → ℝ) : Species → ℝ")
     for s in model.species:
         L.append(f"  | {user(s.name)} => {_dxdt_rhs(model, s.name)}")
     L.append("")

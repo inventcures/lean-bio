@@ -13,8 +13,14 @@ conservation invariant `A + B = M`; strictly positive rate-constant lower bounds
 
 from __future__ import annotations
 
+import os
+import re
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from fractions import Fraction
+from pathlib import Path
 
 from .nodes import Model, exact
 from .lean.names import user, internal, comment
@@ -134,39 +140,101 @@ def _lit(x: Fraction) -> str:
 
 
 def emit_lean_instance(model: Model, p: ReversiblePattern | None = None) -> str:
+    """The model's certificate: a direct application of the general, kernel-
+    checked `BSL.ReversibleTwoSpecies.schema` to this model's numbers.
+
+    The steady state is `IsSteadyState` (a zero of the mass-action vector
+    field defined in Lean), not a hand-written equation, and the only proof
+    work left per model is `norm_num` evaluating rational arithmetic.
+    """
     p = p or classify(model)
     a_lo, a_hi, b_lo, b_hi = certified_bounds(p)
     # User names are «escaped»; emitter binders end in `'`, which no BSL name
     # can contain, so a species named `kf` cannot shadow the rate constant.
     A, B = user(p.sp_a), user(p.sp_b)
     kf, kr = internal("kf"), internal("kr")
-    M = _lit(p.M)
-    hyps = "hkf_lo' hkf_hi' hkr_lo' hkr_hi'"
+    lit = _lit
+    args = " ".join(lit(x) for x in (p.kf_lo, p.kf_hi, p.kr_lo, p.kr_hi, p.M))
     L = [
-        "import Mathlib",
+        "import BslLean.ReversibleTwoSpecies",
         "",
         f"/- Auto-generated from {comment(model.source.name)} by `bsl certify`. -/",
-        "/- Instance of the verified reversible two-species mass-action schema",
-        "   (see BslLean.ReversibleTwoSpecies). Kernel-checked in CI. -/",
+        "/- Instance of the general schema BSL.ReversibleTwoSpecies.schema. -/",
         f"namespace BSL.Generated.{user(model.name)}",
         "",
+        "open BSL.ReversibleTwoSpecies in",
         f"theorem steady_state_bounds ({kf} {kr} {A} {B} : ℝ)",
-        f"    (hkf_lo' : {_lit(p.kf_lo)} ≤ {kf}) (hkf_hi' : {kf} ≤ {_lit(p.kf_hi)})",
-        f"    (hkr_lo' : {_lit(p.kr_lo)} ≤ {kr}) (hkr_hi' : {kr} ≤ {_lit(p.kr_hi)})",
-        f"    (hmass' : {A} + {B} = {M})",
-        f"    (hss' : {kf} * {A} = {kr} * {B}) :",
-        f"    {_lit(a_lo)} ≤ {A} ∧ {A} ≤ {_lit(a_hi)} ∧ "
-        f"{_lit(b_lo)} ≤ {B} ∧ {B} ≤ {_lit(b_hi)} := by",
-        f"  have hpos' : 0 < {kf} + {kr} := by linarith",
-        f"  have hsum' : ({kf} + {kr}) * {A} = {M} * {kr} := by "
-        f"linear_combination hss' + {kr} * hmass'",
-        f"  have hAlo' : {_lit(a_lo)} ≤ {A} := by "
-        f"nlinarith [hsum', hpos', {hyps.replace(' ', ', ')}]",
-        f"  have hAhi' : {A} ≤ {_lit(a_hi)} := by "
-        f"nlinarith [hsum', hpos', {hyps.replace(' ', ', ')}]",
-        "  refine ⟨hAlo', hAhi', ?_, ?_⟩ <;> linarith",
+        f"    (hkf' : {lit(p.kf_lo)} ≤ {kf} ∧ {kf} ≤ {lit(p.kf_hi)})",
+        f"    (hkr' : {lit(p.kr_lo)} ≤ {kr} ∧ {kr} ≤ {lit(p.kr_hi)})",
+        f"    (hmass' : {A} + {B} = {lit(p.M)})",
+        f"    (hss' : IsSteadyState {kf} {kr} {A} {B}) :",
+        f"    {lit(a_lo)} ≤ {A} ∧ {A} ≤ {lit(a_hi)} ∧ "
+        f"{lit(b_lo)} ≤ {B} ∧ {B} ≤ {lit(b_hi)} := by",
+        f"  obtain ⟨h1', h2', h3', h4'⟩ := schema {args} {kf} {kr} {A} {B}",
+        "    (by norm_num) (by norm_num) (by norm_num) hkf' hkr' hmass' hss'",
+        "  exact ⟨le_trans (le_of_eq (by norm_num)) h1', le_trans h2' (le_of_eq (by norm_num)),",
+        "    le_trans (le_of_eq (by norm_num)) h3', le_trans h4' (le_of_eq (by norm_num))⟩",
         "",
         f"end BSL.Generated.{user(model.name)}",
         "",
     ]
     return "\n".join(L)
+
+
+# --- kernel check ------------------------------------------------------------
+
+STANDARD_AXIOMS = {"propext", "Classical.choice", "Quot.sound"}
+
+
+def default_lean_project() -> Path | None:
+    """The repo's `lean/` Lake project, when running from a checkout."""
+    cand = Path(__file__).resolve().parents[1] / "lean"
+    return cand if (cand / "lakefile.toml").exists() else None
+
+
+def find_lake(explicit: str | None = None) -> str | None:
+    for cand in (explicit, os.environ.get("BSL_LAKE")):
+        if cand and Path(cand).exists():
+            return cand
+    found = shutil.which("lake")
+    if found:
+        return found
+    for lean in (os.environ.get("BSL_LEAN"),):
+        if lean and (Path(lean).parent / "lake").exists():
+            return str(Path(lean).parent / "lake")
+    elan = Path.home() / ".elan" / "bin" / "lake"
+    return str(elan) if elan.exists() else None
+
+
+@dataclass
+class KernelResult:
+    ok: bool
+    axioms: list[str]
+    output: str
+
+
+def kernel_check(model: Model, lean_text: str, project: Path, lake: str,
+                 timeout: int = 1800) -> KernelResult:
+    """Kernel-check a generated instance inside the Lake project, then audit
+    its axioms. `ok` only if Lean accepts the file AND the theorem depends on
+    nothing beyond Lean's standard axioms (no `sorry`, no custom `axiom`)."""
+    build = subprocess.run([lake, "build", "BslLean.ReversibleTwoSpecies"],
+                           cwd=project, capture_output=True, text=True,
+                           timeout=timeout)
+    if build.returncode != 0:
+        return KernelResult(False, [], (build.stdout + build.stderr).strip())
+    thm = f"BSL.Generated.{user(model.name)}.steady_state_bounds"
+    with tempfile.TemporaryDirectory() as td:
+        f = Path(td) / "Check.lean"
+        f.write_text(lean_text + f"\n#print axioms {thm}\n", encoding="utf-8")
+        proc = subprocess.run([lake, "env", "lean", str(f)], cwd=project,
+                              capture_output=True, text=True, timeout=timeout)
+    out = (proc.stdout + proc.stderr).strip()
+    axioms: list[str] = []
+    m = re.search(r"depends on axioms: \[(.*?)\]", out, re.S)
+    if m:
+        axioms = [a.strip() for a in m.group(1).split(",") if a.strip()]
+    clean = "does not depend on any axioms" in out or (
+        m is not None and set(axioms) <= STANDARD_AXIOMS)
+    ok = proc.returncode == 0 and clean
+    return KernelResult(ok, axioms, out)

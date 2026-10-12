@@ -156,7 +156,9 @@ def cmd_certify(args) -> int:
               file=sys.stderr)
         return 1
 
-    from .certify import classify, certified_bounds, emit_lean_instance, Unsupported
+    from .certify import (classify, certified_bounds, emit_lean_instance,
+                          Unsupported, default_lean_project, find_lake,
+                          kernel_check)
     try:
         p = classify(model)
     except Unsupported as e:
@@ -164,17 +166,47 @@ def cmd_certify(args) -> int:
         return 3  # fail closed: precise reason, no Lean emitted
 
     a_lo, a_hi, b_lo, b_hi = certified_bounds(p)
-    print(f"certified: reversible two-species  {p.sp_a} ⇌ {p.sp_b}")
-    print(f"  {p.sp_a}* ∈ [{a_lo}, {a_hi}],  {p.sp_b}* ∈ [{b_lo}, {b_hi}]  "
-          f"(for kf∈[{p.kf_lo},{p.kf_hi}], kr∈[{p.kr_lo},{p.kr_hi}], M={p.M})")
+    bounds = (f"{p.sp_a}* ∈ [{a_lo}, {a_hi}],  {p.sp_b}* ∈ [{b_lo}, {b_hi}]  "
+              f"(for kf∈[{p.kf_lo},{p.kf_hi}], kr∈[{p.kr_lo},{p.kr_hi}], M={p.M})")
     lean = emit_lean_instance(model, p)
     if args.lean_out:
         out = Path(args.lean_out) / f"{model.name}.lean"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(lean, encoding="utf-8")
-        print(f"  -> {out}  (kernel-checked in CI)")
+        where = f"  -> {out}"
     else:
         print(lean)
+        where = None
+
+    # "certified" is the kernel's verdict, never Python's arithmetic.
+    if args.no_check:
+        print(f"UNCHECKED (--no-check): candidate {bounds}")
+        if where:
+            print(where)
+        return 4
+    project = Path(args.lean_project) if args.lean_project else default_lean_project()
+    lake = find_lake(args.lake)
+    if project is None or lake is None:
+        print(f"NOT CERTIFIED: no Lean toolchain/project to check against "
+              f"(set --lake/$BSL_LAKE and --lean-project). "
+              f"Candidate, unchecked: {bounds}", file=sys.stderr)
+        if where:
+            print(where)
+        return 4
+    res = kernel_check(model, lean, project, lake)
+    if not res.ok:
+        print(f"NOT CERTIFIED: Lean rejected the certificate for {bounds}",
+              file=sys.stderr)
+        print(res.output, file=sys.stderr)
+        if where:
+            print(where)
+        return 5
+    print(f"certified (kernel-checked): reversible two-species  "
+          f"{p.sp_a} ⇌ {p.sp_b}")
+    print(f"  {bounds}")
+    print(f"  axioms: {', '.join(res.axioms) or 'none'}")
+    if where:
+        print(where)
     return 0
 
 
@@ -221,6 +253,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="directory to write the generated Lean instance")
     sp.add_argument("--force", action="store_true",
                     help="certify even if the model has errors")
+    sp.add_argument("--lean-project", dest="lean_project",
+                    help="Lake project to kernel-check in (default: the repo's lean/)")
+    sp.add_argument("--lake", help="path to the lake binary (else $BSL_LAKE / PATH)")
+    sp.add_argument("--no-check", dest="no_check", action="store_true",
+                    help="emit the Lean instance without kernel-checking it "
+                         "(reported as UNCHECKED, exit code 4)")
     sp.set_defaults(func=cmd_certify)
 
     return p

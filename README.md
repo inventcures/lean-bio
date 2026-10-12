@@ -52,6 +52,7 @@ python -m bsl compile examples/A-enzyme-kinetics/model.bsl --out out/enzyme
 
 # real Lean kernel checks (needs a Lean 4 toolchain, or use the Dockerfile)
 python -m bsl verify  examples/D-linear-pathway/model.bsl   # parameter-bounded flux band
+# certify needs the Mathlib-backed project built once: (cd lean && lake exe cache get && lake build)
 python -m bsl certify examples/E-reversible/model.bsl --lean-out lean/BslLean/Generated
 ```
 
@@ -71,9 +72,13 @@ not "trust me," but "run it."
 - **`bsl verify`**: emits core-only obligations (conservation, steady-state flux
   bounds) and runs Lean's `omega` to discharge — or *refute, with a
   counterexample* — them. No Mathlib required.
-- **`bsl certify`**: recognizes the one verified network class and instantiates
-  the ℝ-valued steady-state schema as a Lean theorem; **fails closed** (precise
-  reason, no Lean emitted) on anything outside the certified subset.
+- **`bsl certify`**: recognizes the one verified network class and emits the
+  model's certificate as an application of a single general Lean theorem
+  (`BSL.ReversibleTwoSpecies.schema`, proved from the mass-action vector field),
+  then **kernel-checks it and audits its axioms**. It prints `certified` only
+  if Lean accepts the file and the theorem uses nothing beyond Lean's standard
+  axioms; without a toolchain it reports `NOT CERTIFIED` (exit 4). It **fails
+  closed** (precise reason, no Lean emitted) on anything outside the subset.
 - **`lean/`**: the Mathlib-backed flagship, kernel-checked in CI.
 
 ## Status

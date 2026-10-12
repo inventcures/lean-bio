@@ -28,8 +28,9 @@ def test_emitted_instance_is_flagship_shaped():
     m = parse_file(EX / "E-reversible" / "model.bsl")
     lean = emit_lean_instance(m)
     assert "theorem steady_state_bounds" in lean
-    assert "linear_combination hss' + kr' * hmass'" in lean
-    assert "nlinarith" in lean
+    assert "import BslLean.ReversibleTwoSpecies" in lean
+    assert "schema 1 2 3 4 10 kf' kr' «A» «B»" in lean
+    assert "IsSteadyState kf' kr' «A» «B»" in lean
     assert "6 ≤ «A» ∧ «A» ≤ 8 ∧ 2 ≤ «B» ∧ «B» ≤ 4" in lean
     assert "sorry" not in lean
 
@@ -152,7 +153,7 @@ def test_species_named_like_binders_cannot_shadow_them():
     }"""
     lean = emit_lean_instance(parse(src))
     assert "(kf' kr' «kr» «kf» : ℝ)" in lean
-    assert "(hss' : kf' * «kr» = kr' * «kf»)" in lean
+    assert "(hss' : IsSteadyState kf' kr' «kr» «kf»)" in lean
 
 
 def test_repeated_invariant_terms_are_summed_not_collapsed():
@@ -169,3 +170,46 @@ def test_total_must_match_initial_state():
     with pytest.raises(Unsupported) as e:
         classify(parse(_rev(("1.0", "2.0"), ("3.0", "4.0"), "20.0")))
     assert e.value.code == "InconsistentConservationLaw"
+
+
+# --- kernel check (needs a Lake project with Mathlib built) -------------------
+
+import os
+
+from bsl.certify import find_lake, kernel_check, default_lean_project
+
+_PROJECT = os.environ.get("BSL_LEAN_PROJECT")
+_PROJECT = Path(_PROJECT) if _PROJECT else None
+needs_kernel = pytest.mark.skipif(
+    _PROJECT is None or find_lake() is None,
+    reason="set BSL_LEAN_PROJECT to a built Lake project (e.g. lean/) and "
+           "provide lake to run kernel checks")
+
+
+@needs_kernel
+def test_kernel_accepts_generated_certificate():
+    m = parse_file(EX / "E-reversible" / "model.bsl")
+    res = kernel_check(m, emit_lean_instance(m), _PROJECT, find_lake())
+    assert res.ok, res.output
+    assert set(res.axioms) <= {"propext", "Classical.choice", "Quot.sound"}
+
+
+@needs_kernel
+def test_kernel_rejects_wrong_bounds(monkeypatch):
+    import bsl.certify as c
+    m = parse_file(EX / "E-reversible" / "model.bsl")
+    monkeypatch.setattr(c, "certified_bounds",
+                        lambda p: (Fraction(7), Fraction(8), Fraction(2), Fraction(3)))
+    res = kernel_check(m, c.emit_lean_instance(m), _PROJECT, find_lake())
+    assert not res.ok
+
+
+@needs_kernel
+def test_kernel_check_rejects_sorry():
+    m = parse_file(EX / "E-reversible" / "model.bsl")
+    lean = emit_lean_instance(m)
+    head, _, _ = lean.partition(":= by")
+    cheat = head + ":= by\n  sorry\n\nend BSL.Generated.«ReversibleAB»\n"
+    res = kernel_check(m, cheat, _PROJECT, find_lake())
+    assert not res.ok
+    assert "sorryAx" in res.axioms
