@@ -78,3 +78,42 @@ def test_too_tight_flux_band_refuted(tmp_path):
     }"""
     journal, _ = run_verification(parse(src), tmp_path)
     assert journal["result"] == "failed"
+
+
+_PARITY = """model P {{
+  species A
+  species B
+  reaction influx : -> A @mass_action(vin)
+  reaction dimer  : 2 A -> B @mass_action(k1)
+  reaction efflux : B -> @mass_action(k2)
+  param vin in [{vlo}, {vhi}] @assumed
+  param k1  in [1.0, 2.0] @assumed
+  param k2  in [1.0, 2.0] @assumed
+  steady_state
+  property p : flux(efflux) in [{lo}, {hi}]
+}}"""
+
+
+@needs_lean
+def test_integer_only_band_is_refuted_over_the_reals(tmp_path):
+    # Over ℤ, v_in = 2·v_dimer forces v_in = 2 and efflux = 1. Over ℝ the
+    # efflux is v_in / 2 ∈ [0.5, 1.5], so "efflux = 1" must NOT verify.
+    src = _PARITY.format(vlo="1.0", vhi="3.0", lo="1.0", hi="1.0")
+    journal, _ = run_verification(parse(src), tmp_path)
+    assert journal["result"] == "failed", journal
+
+
+@needs_lean
+def test_integer_infeasible_system_does_not_prove_anything(tmp_path):
+    # v_in = 1 has no integer solution of v_in = 2·v_dimer; ex falso used to
+    # "verify" efflux ∈ [100, 200]. The real efflux is 0.5.
+    src = _PARITY.format(vlo="1.0", vhi="1.0", lo="100.0", hi="200.0")
+    journal, _ = run_verification(parse(src), tmp_path)
+    assert journal["result"] == "failed", journal
+
+
+@needs_lean
+def test_fractional_band_verifies_over_the_reals(tmp_path):
+    src = _PARITY.format(vlo="1.0", vhi="3.0", lo="0.5", hi="1.5")
+    journal, _ = run_verification(parse(src), tmp_path)
+    assert journal["result"] == "verified", journal

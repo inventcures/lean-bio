@@ -32,13 +32,17 @@ Works:
   `steady_state` declaration and `property p : flux(r) in [lo, hi]`). An
   interval-bounded influx propagates through steady-state flux balance to a
   certified interval on a downstream flux, closed by `omega`; a too-tight band
-  is refuted.
+  is refuted. Fluxes are real-valued, so the obligation is *homogenized*
+  (`v = w / d`, `w ∈ ℤⁿ`, `d > 0`) before `omega` sees it: that makes the
+  integer statement equivalent to the rational (hence real) one. A plain
+  integer encoding is unsound here; e.g. `2A → B` with `v_in = 1` has no
+  integer steady state, so any band would "verify".
 
 Not yet:
 
 - **Nonlinear, real-valued parameter bounds — written, CI-checked, not sandbox-checked.**
-  `bsl verify` proves conservation and steady-state *flux* bounds over the
-  integers with Lean core (`omega`). The flagship "∀ k ∈ [a,b], steady-state
+  `bsl verify` proves conservation and steady-state *flux* bounds, which are
+  linear, with Lean core (`omega`). The flagship "∀ k ∈ [a,b], steady-state
   *concentration* ∈ [c,d]" needs ℝ, division, and nonlinear arithmetic — i.e.
   Mathlib. That proof now exists, for the reversible two-species network `A ⇌ B`,
   in [`lean/BslLean/ReversibleTwoSpecies.lean`](../lean/BslLean/ReversibleTwoSpecies.lean):

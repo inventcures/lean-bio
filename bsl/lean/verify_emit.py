@@ -17,8 +17,11 @@ network, `c . N != 0` for some reaction, the goal is false, and `omega` fails.
 
 from __future__ import annotations
 
+from fractions import Fraction
+from math import gcd
+
 from .emit import _net
-from ..nodes import Model, Invariant, FluxProperty
+from ..nodes import Model, Invariant, FluxProperty, exact
 
 
 def _is_int(x: float) -> bool:
@@ -110,52 +113,70 @@ def obligation(model: Model, inv: Invariant) -> dict:
     }
 
 
+def _lcm_den(qs) -> int:
+    L = 1
+    for q in qs:
+        L = L * q.denominator // gcd(L, q.denominator)
+    return L
+
+
+def _lin(coeffs: dict, rel: str, d_coeff: Fraction) -> str:
+    """Render `Σ coeffs[v]·v  rel  d_coeff·d`, scaled to integer coefficients."""
+    L = _lcm_den(list(coeffs.values()) + [d_coeff])
+    lhs = _join_plus([_term(int(c * L), v) for v, c in coeffs.items() if c != 0])
+    k = int(d_coeff * L)
+    rhs = "0" if k == 0 else _term(k, "d")
+    return f"{lhs} {rel} {rhs}"
+
+
 def _steady_state_obligation(model: Model, prop: FluxProperty) -> dict:
     """Bound a reaction flux from steady-state flux balance + interval influx.
 
     At steady state the net flux of each species is zero (`S v = 0`). A
     zeroth-order influx reaction's flux equals its rate constant, so its
-    parameter interval bounds that flux. Both are linear in the opaque integer
-    fluxes, so the target bound closes by `omega`. A wrong bound is refuted.
+    parameter interval bounds that flux. The target bound must follow for
+    every REAL flux vector satisfying those linear constraints.
+
+    `omega` decides integer arithmetic, and integer validity does NOT imply
+    real validity for a feasibility statement: with `∅ → A`, `2A → B`,
+    `B → ∅` and `v_in ∈ [1, 1]`, no integer flux vector exists, so any bound
+    would "verify" over ℤ while the real efflux is 0.5. We therefore
+    homogenize: every rational flux vector is `v = w / d` with `w ∈ ℤⁿ`,
+    `d ∈ ℤ, d > 0`, and multiplying each constraint by `d` keeps it linear
+    (constants become multiples of `d`). The obligation quantifies over all
+    such `(d, w)`, so it is equivalent to the statement over ℚ. Over ℚ and ℝ
+    the statements agree: the counterexamples form a polyhedron with rational
+    data, which is empty over ℝ iff it is empty over ℚ. Hence `omega`
+    proving the homogenized goal is a proof of the real-valued bound, and a
+    failure is a genuine (rational) counterexample.
     """
+    lo, hi = exact(prop.lo), exact(prop.hi)
     claim = (f"flux({prop.reaction}) in "
              f"[{_int_or_float(prop.lo)}, {_int_or_float(prop.hi)}] at steady state")
-    ints_ok = (
-        _is_int(prop.lo) and _is_int(prop.hi)
-        and all(_is_int(_net(r, s.name))
-                for r in model.reactions for s in model.species)
-    )
-    if not ints_ok:
-        return {
-            "name": prop.name, "claim": claim, "integer_ok": False,
-            "lean": f"-- {prop.name}: skipped (non-integer coefficients)",
-        }
 
-    species_eqs: list[tuple[str, str]] = []
+    hyps: list[tuple[str, str]] = [("hd", "0 < d")]
     for s in model.species:
-        expr = _dexpr(model, s.name, model.reactions)
-        if expr != "0":
-            species_eqs.append((f"hs_{s.name}", expr))
+        coeffs = {f"v_{r.name}": _net(r, s.name) for r in model.reactions}
+        if any(c != 0 for c in coeffs.values()):
+            hyps.append((f"hs_{s.name}", _lin(coeffs, "=", Fraction(0))))
 
     pmap = {p.name: p for p in model.params}
-    influx: list[tuple[str, str]] = []
     for r in model.reactions:
         if (r.rate_law == "mass_action" and len(r.reactants) == 0
                 and r.rate_args and r.rate_args[0].name in pmap):
             p = pmap[r.rate_args[0].name]
-            if _is_int(p.lo) and _is_int(p.hi):
-                influx.append((f"hin_lo_{r.name}", f"{int(p.lo)} ≤ v_{r.name}"))
-                influx.append((f"hin_hi_{r.name}", f"v_{r.name} ≤ {int(p.hi)}"))
+            v = {f"v_{r.name}": Fraction(1)}
+            hyps.append((f"hin_lo_{r.name}", _lin(v, "≥", exact(p.lo))))
+            hyps.append((f"hin_hi_{r.name}", _lin(v, "≤", exact(p.hi))))
 
+    t = {f"v_{prop.reaction}": Fraction(1)}
+    goal = f"{_lin(t, '≥', lo)} ∧ {_lin(t, '≤', hi)}"
     flux_vars = " ".join(f"v_{r.name}" for r in model.reactions)
-    hyps = "".join(f"\n    ({hn} : {expr} = 0)" for hn, expr in species_eqs)
-    hyps += "".join(f"\n    ({hn} : {ln})" for hn, ln in influx)
-    goal = (f"{int(prop.lo)} ≤ v_{prop.reaction} ∧ "
-            f"v_{prop.reaction} ≤ {int(prop.hi)}")
     body = (
-        f"theorem {prop.name} ({flux_vars} : Int){hyps} :\n"
-        f"    {goal} := by\n"
-        f"  omega"
+        f"-- Homogenized over ℚ: real fluxes are v_r / d (see verify_emit.py).\n"
+        f"theorem {prop.name} (d {flux_vars} : Int)"
+        + "".join(f"\n    ({hn} : {ln})" for hn, ln in hyps)
+        + f" :\n    {goal} := by\n  omega"
     )
     return {"name": prop.name, "claim": claim, "integer_ok": True, "lean": body}
 
