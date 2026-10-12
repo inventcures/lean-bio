@@ -50,13 +50,14 @@ def _join_plus(parts: list[str]) -> str:
     return out
 
 
-def _dexpr(model: Model, species: str, relevant: list) -> str:
+def _dexpr(model: Model, species: str, relevant: list, scale: int = 1) -> str:
+    """`scale · d/dt(species)` as an integer combination of the fluxes."""
     terms = []
     for r in relevant:
-        c = int(_net(r, species))
+        c = _net(r, species) * scale
         if c == 0:
             continue
-        terms.append(_term(c, f"v_{r.name}"))
+        terms.append(_term(int(c), f"v_{r.name}"))
     return _join_plus(terms)
 
 
@@ -72,27 +73,26 @@ def _int_or_float(x: float):
 
 
 def obligation(model: Model, inv: Invariant) -> dict:
-    expr = _human(inv)
-    coeffs_ok = all(_is_int(t.coeff) for t in inv.terms) and all(
-        _is_int(_net(r, t.species)) for r in model.reactions for t in inv.terms
-    )
-    if not coeffs_ok:
-        return {
-            "name": inv.name,
-            "claim": f"d/dt({expr}) = 0",
-            "integer_ok": False,
-            "lean": f"-- {inv.name}: skipped (non-integer coefficients; the omega "
-                    f"path requires integers)",
-        }
+    """`d/dt(c·x) = 0` as a flux-abstract identity, closed by `omega`.
 
+    Rational coefficients are scaled to integers: with `L1` the LCM of the
+    invariant's denominators and `L2` that of the stoichiometry, the emitted
+    goal is `Σ (L1·c_i)·(L2·(N v)_i) = 0`, i.e. `L1·L2` times the claim. A
+    non-zero multiple of a linear identity holds iff the identity does, and an
+    identity holds over ℤ iff it holds over ℝ (its coefficients must vanish).
+    """
+    expr = _human(inv)
+    claim = f"d/dt({expr}) = 0"
     relevant = [
         r for r in model.reactions
         if any(_net(r, t.species) != 0 for t in inv.terms)
     ]
+    L1 = _lcm_den([exact(t.coeff) for t in inv.terms])
+    L2 = _lcm_den([_net(r, t.species) for r in relevant for t in inv.terms])
     parts = []
     for t in inv.terms:
-        c = int(t.coeff)
-        inner = f"({_dexpr(model, t.species, relevant)})"
+        c = int(exact(t.coeff) * L1)
+        inner = f"({_dexpr(model, t.species, relevant, L2)})"
         if c == 1:
             parts.append(inner)
         elif c == -1:
@@ -103,17 +103,14 @@ def obligation(model: Model, inv: Invariant) -> dict:
 
     flux_vars = " ".join(f"v_{r.name}" for r in relevant)
     sig = f" ({flux_vars} : Int)" if relevant else ""
+    note = (f"-- Scaled by {L1 * L2} to integer coefficients.\n"
+            if L1 * L2 != 1 else "")
     body = (
-        f"theorem {user(inv.name)}{sig} :\n"
+        f"{note}theorem {user(inv.name)}{sig} :\n"
         f"    {lhs} = 0 := by\n"
         f"  omega"
     )
-    return {
-        "name": inv.name,
-        "claim": f"d/dt({expr}) = 0",
-        "integer_ok": True,
-        "lean": body,
-    }
+    return {"name": inv.name, "claim": claim, "integer_ok": True, "lean": body}
 
 
 def _lcm_den(qs) -> int:

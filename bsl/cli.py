@@ -118,6 +118,7 @@ _STATUS_MARK = {
     "failed": "[XX]",
     "skipped": "[--]",
     "unchecked": "[??]",
+    "error": "[!!]",
 }
 
 
@@ -142,10 +143,12 @@ def cmd_verify(args) -> int:
     print(f"  journal   : {out_dir / (model.name + '.journal.json')}")
     if journal["result"] == "unchecked":
         print(f"  note: {journal['note']}", file=sys.stderr)
-    if journal["result"] == "failed":
-        print(f"  lean output:\n{journal.get('lean_output', '')}", file=sys.stderr)
+    for o in journal["obligations"]:
+        if o.get("lean_output"):
+            print(f"  lean output ({o['name']}):\n{o['lean_output']}",
+                  file=sys.stderr)
 
-    return 1 if journal["result"] == "failed" else 0
+    return 1 if journal["result"] in ("failed", "error") else 0
 
 
 def cmd_certify(args) -> int:

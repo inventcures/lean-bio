@@ -69,3 +69,38 @@ def test_lean_keyword_names_compile(tmp_path):
     }"""
     journal, _ = run_verification(parse(src), tmp_path)
     assert journal["result"] == "verified", journal
+
+
+@needs_lean
+def test_true_law_is_not_failed_by_a_false_sibling(tmp_path):
+    # The file used to be checked as a whole, so the true law was [XX] too.
+    src = """model M {
+      species A @init 1.0
+      species B @init 0.0
+      species C @init 0.0
+      reaction r : A -> B @mass_action(k)
+      reaction s : B -> 2 C @mass_action(k)
+      param k in [1.0, 2.0] @assumed
+      invariant good : 2 A + 2 B + C = 2.0
+      invariant wrong : A + B = 1.0
+    }"""
+    journal, _ = run_verification(parse(src), tmp_path)
+    status = {o["name"]: o["status"] for o in journal["obligations"]}
+    assert status == {"good": "discharged", "wrong": "failed"}
+    assert journal["result"] == "failed"
+
+
+@needs_lean
+def test_fractional_conservation_law_is_proved_not_skipped(tmp_path):
+    src = """model M {
+      species A @init 1.0
+      species B @init 0.0
+      species C @init 0.0
+      reaction r : A -> B @mass_action(k)
+      reaction s : B -> 2 C @mass_action(k)
+      param k in [1.0, 2.0] @assumed
+      invariant good : A + B + 0.5 C = 1.0
+    }"""
+    journal, _ = run_verification(parse(src), tmp_path)
+    assert journal["obligations"][0]["status"] == "discharged"
+    assert journal["result"] == "verified"
