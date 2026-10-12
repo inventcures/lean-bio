@@ -16,11 +16,16 @@ requires a Lean 4 toolchain with Mathlib.
 
 from __future__ import annotations
 
-from ..nodes import Model, Reaction
+from ..nodes import Model, Reaction, exact
 
 
 def _fmt(v: float) -> str:
-    return str(int(v)) if v == int(v) else repr(v)
+    # Exact rational literal: `repr(float)` would print `1e-09` (not Lean
+    # syntax) or `inf`, and a float is only an approximation of the source.
+    q = exact(v)
+    if q.denominator == 1:
+        return str(q.numerator)
+    return f"({q.numerator} / {q.denominator} : ℝ)"
 
 
 def _argref(a) -> str:
@@ -50,9 +55,10 @@ def _flux(r: Reaction) -> str:
     return "0"
 
 
-def _net(r: Reaction, species: str) -> float:
-    produced = sum(ref.coeff for ref in r.products if ref.species == species)
-    consumed = sum(ref.coeff for ref in r.reactants if ref.species == species)
+def _net(r: Reaction, species: str):
+    """Exact net stoichiometric coefficient (a `Fraction`)."""
+    produced = sum(exact(ref.coeff) for ref in r.products if ref.species == species)
+    consumed = sum(exact(ref.coeff) for ref in r.reactants if ref.species == species)
     return produced - consumed
 
 

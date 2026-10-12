@@ -28,6 +28,7 @@ from .nodes import (
     Param,
     Invariant,
     FluxProperty,
+    Num,
     Source,
     RateArg,
     KNOWN_RATE_LAWS,
@@ -82,9 +83,9 @@ class _Parser:
     def _span(self, start: Token, end: Token):
         return self.src.span(start.cstart, end.cend, start.line, start.col)
 
-    def _number(self) -> tuple[float, Token]:
+    def _number(self) -> tuple[Num, Token]:
         t = self.expect("NUMBER")
-        return float(t.value), t
+        return Num(t.value), t
 
     # --- grammar --------------------------------------------------------------
     def parse_model(self) -> Model:
@@ -160,7 +161,7 @@ class _Parser:
         coeff = 1.0
         start = self.cur
         if self.at("NUMBER"):
-            coeff = float(self.advance().value)
+            coeff = Num(self.advance().value)
         name = self.expect("NAME")
         return SpeciesRef(
             coeff=coeff, species=name.value, span=self._span(start, name)
@@ -210,7 +211,7 @@ class _Parser:
         t = self.cur
         if self.at("NUMBER"):
             self.advance()
-            return RateArg(name=None, value=float(t.value), span=self._span(t, t))
+            return RateArg(name=None, value=Num(t.value), span=self._span(t, t))
         if self.at("NAME"):
             self.advance()
             return RateArg(name=t.value, value=None, span=self._span(t, t))

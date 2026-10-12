@@ -84,3 +84,55 @@ def test_fail_closed_nonpositive_rate():
     with pytest.raises(Unsupported) as e:
         classify(parse(src))
     assert e.value.code == "CannotProvePositiveDenominator"
+
+
+def _rev(kf, kr, total, init_a="6.0", init_b="4.0"):
+    return f"""model R {{
+      species A @init {init_a}
+      species B @init {init_b}
+      reaction f : A -> B @mass_action(kf)
+      reaction r : B -> A @mass_action(kr)
+      param kf in [{kf[0]}, {kf[1]}] @assumed
+      param kr in [{kr[0]}, {kr[1]}] @assumed
+      invariant tot : A + B = {total}
+    }}"""
+
+
+def test_nanomolar_total_is_exact_not_rounded_to_zero():
+    # 5 nM in molar units used to round to M = 0 and certify A*, B* ∈ [0, 0].
+    src = _rev(("1.0", "2.0"), ("3.0", "4.0"), "5.0e-9", "3.0e-9", "2.0e-9")
+    p = classify(parse(src))
+    assert p.M == Fraction(5, 10**9)
+    a_lo, a_hi, _, _ = certified_bounds(p)
+    assert (a_lo, a_hi) == (Fraction(3, 10**9), Fraction(4, 10**9))
+
+
+def test_slow_rate_constant_is_exact_not_rounded_to_zero():
+    # kf ∈ [1e-7, 2e-7] used to become kf ∈ [0, 0] and certify A* = 10.
+    p = classify(parse(_rev(("1.0e-7", "2.0e-7"), ("3.0", "4.0"), "10.0")))
+    assert p.kf_lo == Fraction(1, 10**7) and p.kf_hi == Fraction(2, 10**7)
+    a_lo, a_hi, _, _ = certified_bounds(p)
+    assert a_lo < 10 and a_hi < 10
+
+
+def test_bounds_with_many_significant_digits_are_not_rounded():
+    # kf_hi = 2.0000004 used to round to 2, so the certified A* lower bound
+    # (6) excluded the model's own corner A* = 30/5.0000004.
+    p = classify(parse(_rev(("1.0", "2.0000004"), ("3.0", "4.0"), "10.0")))
+    a_lo, _, _, _ = certified_bounds(p)
+    assert a_lo == Fraction(30) / (Fraction("2.0000004") + 3)
+    assert a_lo < 6
+
+
+def test_tiny_rates_on_both_sides_do_not_crash():
+    # Both lower bounds used to round to 0 -> ZeroDivisionError.
+    p = classify(parse(_rev(("1.0e-7", "2.0e-7"), ("3.0e-7", "4.0e-7"), "10.0")))
+    a_lo, a_hi, _, _ = certified_bounds(p)
+    assert 0 < a_lo <= a_hi < 10
+
+
+def test_huge_bound_does_not_crash():
+    # 1e400 overflows a float; it used to raise OverflowError.
+    p = classify(parse(_rev(("1.0", "1e400"), ("3.0", "4.0"), "10.0")))
+    assert p.kf_hi == 10**400
+    emit_lean_instance(parse(_rev(("1.0", "1e400"), ("3.0", "4.0"), "10.0")), p)

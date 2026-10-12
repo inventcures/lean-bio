@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from fractions import Fraction
 
-from .nodes import Model
+from .nodes import Model, exact
 
 
 class Unsupported(Exception):
@@ -39,10 +39,6 @@ class ReversiblePattern:
     kf_hi: Fraction
     kr_lo: Fraction
     kr_hi: Fraction
-
-
-def _frac(x: float) -> Fraction:
-    return Fraction(x).limit_denominator(10**6)
 
 
 def classify(model: Model) -> ReversiblePattern:
@@ -82,7 +78,7 @@ def classify(model: Model) -> ReversiblePattern:
     for inv in model.invariants:
         terms = {t.species: t.coeff for t in inv.terms}
         if set(terms) == {sp_a, sp_b} and terms[sp_a] == 1 and terms[sp_b] == 1:
-            M = _frac(inv.rhs)
+            M = exact(inv.rhs)
             break
     if M is None:
         raise Unsupported("MissingConservationLaw",
@@ -93,14 +89,18 @@ def classify(model: Model) -> ReversiblePattern:
         raise Unsupported("UnsupportedConstruct",
                           "rate parameters are not declared")
     pf, pr = pmap[kf], pmap[kr]
-    if not (pf.lo > 0 and pr.lo > 0):
+    # Exact rationals from the source text. Never round: a float rounded to a
+    # small denominator turns 1e-7 into 0 and silently changes the model.
+    kf_lo, kf_hi = exact(pf.lo), exact(pf.hi)
+    kr_lo, kr_hi = exact(pr.lo), exact(pr.hi)
+    if not (kf_lo > 0 and kr_lo > 0):
         raise Unsupported("CannotProvePositiveDenominator",
                           "rate-constant lower bounds must be strictly positive")
 
     return ReversiblePattern(
         sp_a=sp_a, sp_b=sp_b, kf=kf, kr=kr, M=M,
-        kf_lo=_frac(pf.lo), kf_hi=_frac(pf.hi),
-        kr_lo=_frac(pr.lo), kr_hi=_frac(pr.hi),
+        kf_lo=kf_lo, kf_hi=kf_hi,
+        kr_lo=kr_lo, kr_hi=kr_hi,
     )
 
 

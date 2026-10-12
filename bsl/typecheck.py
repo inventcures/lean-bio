@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .nodes import Model, Span, SINGLE_SUBSTRATE_LAWS
+from .nodes import Model, Span, SINGLE_SUBSTRATE_LAWS, exact
 
 
 @dataclass
@@ -78,7 +78,7 @@ def check(model: Model) -> list[Diagnostic]:
 
     # --- parameter intervals: lo <= hi, rate constants non-negative ---------
     for p in model.params:
-        if p.lo > p.hi:
+        if exact(p.lo) > exact(p.hi):
             diags.append(Diagnostic(
                 "error", "E_BAD_INTERVAL",
                 f"parameter {p.name!r} has empty interval [{p.lo}, {p.hi}] "
@@ -110,7 +110,7 @@ def check(model: Model) -> list[Diagnostic]:
                 f"property {prop.name!r} references undeclared reaction "
                 f"{prop.reaction!r}", prop.span,
             ))
-        if prop.lo > prop.hi:
+        if exact(prop.lo) > exact(prop.hi):
             diags.append(Diagnostic(
                 "error", "E_BAD_INTERVAL",
                 f"property {prop.name!r} has empty interval "

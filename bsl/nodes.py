@@ -9,6 +9,38 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
+from fractions import Fraction
+
+
+class Num(float):
+    """A numeric literal that remembers its exact decimal value.
+
+    Behaves as a `float` everywhere (JSON, formatting, comparisons), but `.q`
+    holds the exact rational written in the source. `1e-9` as a float is a
+    binary approximation, and rounding it (e.g. `limit_denominator`) can turn
+    a nanomolar total into 0. Anything that emits a Lean statement must use
+    `exact()`, never the float.
+    """
+
+    q: Fraction
+
+    def __new__(cls, text: str):
+        obj = super().__new__(cls, float(text))
+        obj.q = Fraction(text)
+        return obj
+
+
+def exact(x) -> Fraction:
+    """The exact rational value of a parsed number (or of a programmatic one).
+
+    For a plain float, `Fraction(float)` is the float's exact binary value,
+    which is still exact: no rounding is ever introduced here.
+    """
+    if isinstance(x, Num):
+        return x.q
+    if isinstance(x, Fraction):
+        return x
+    return Fraction(x)
 
 
 @dataclass(frozen=True)
