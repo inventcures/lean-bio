@@ -153,3 +153,19 @@ def test_species_named_like_binders_cannot_shadow_them():
     lean = emit_lean_instance(parse(src))
     assert "(kf' kr' «kr» «kf» : ℝ)" in lean
     assert "(hss' : kf' * «kr» = kr' * «kf»)" in lean
+
+
+def test_repeated_invariant_terms_are_summed_not_collapsed():
+    # `A + A + B` is 2A + B. It used to be read as A + B and certified.
+    src = _rev(("1.0", "2.0"), ("3.0", "4.0"), "10.0", "2.0", "6.0").replace(
+        "invariant tot : A + B", "invariant tot : A + A + B")
+    with pytest.raises(Unsupported) as e:
+        classify(parse(src))
+    assert e.value.code == "MissingConservationLaw"
+
+
+def test_total_must_match_initial_state():
+    # Initial total is 10; certifying with 20 described unreachable states.
+    with pytest.raises(Unsupported) as e:
+        classify(parse(_rev(("1.0", "2.0"), ("3.0", "4.0"), "20.0")))
+    assert e.value.code == "InconsistentConservationLaw"

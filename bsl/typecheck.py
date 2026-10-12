@@ -101,6 +101,48 @@ def check(model: Model) -> list[Diagnostic]:
                     f"{ref.species!r}", ref.span,
                 ))
 
+    # --- invariants: anchored to the initial state, physically non-negative --
+    # A conservation law only says d/dt(c·x) = 0; the constant is fixed by the
+    # initial state. A declared total that disagrees with `@init` describes
+    # states the model can never reach, so anything proved from it is vacuous
+    # for the model.
+    by_name = {s.name: s for s in model.species}
+    for inv in model.invariants:
+        refs = [by_name.get(t.species) for t in inv.terms]
+        if any(r is None for r in refs):
+            continue  # already reported as undeclared
+        seen_terms: set[str] = set()
+        for t in inv.terms:
+            if t.species in seen_terms:
+                diags.append(Diagnostic(
+                    "warning", "W_REPEATED_TERM",
+                    f"invariant {inv.name!r} mentions {t.species!r} more than "
+                    f"once; coefficients are summed", t.span,
+                ))
+            seen_terms.add(t.species)
+        if all(r.has_init for r in refs):
+            total = sum(exact(t.coeff) * exact(r.initial)
+                        for t, r in zip(inv.terms, refs))
+            if total != exact(inv.rhs):
+                diags.append(Diagnostic(
+                    "error", "E_INVARIANT_INIT_MISMATCH",
+                    f"invariant {inv.name!r} declares {_q(inv.rhs)} but the "
+                    f"initial state gives {_q(total)}", inv.span,
+                ))
+        else:
+            diags.append(Diagnostic(
+                "warning", "W_INVARIANT_UNANCHORED",
+                f"invariant {inv.name!r} references species without `@init`, "
+                f"so its total cannot be checked against the initial state",
+                inv.span,
+            ))
+        if exact(inv.rhs) < 0 and all(exact(t.coeff) > 0 for t in inv.terms):
+            diags.append(Diagnostic(
+                "error", "E_NEGATIVE_TOTAL",
+                f"invariant {inv.name!r} sets a sum of non-negative "
+                f"concentrations to {_q(inv.rhs)}", inv.span,
+            ))
+
     # --- steady-state flux properties ---------------------------------------
     reaction_names = {r.name for r in model.reactions}
     for prop in model.properties:
@@ -136,6 +178,11 @@ def check(model: Model) -> list[Diagnostic]:
             ))
 
     return diags
+
+
+def _q(x) -> str:
+    q = exact(x)
+    return str(q.numerator) if q.denominator == 1 else str(float(q))
 
 
 def has_errors(diags: list[Diagnostic]) -> bool:

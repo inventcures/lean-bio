@@ -144,7 +144,8 @@ class _Parser:
             self.advance()
             self.expect_kw("init")
             initial, end = self._number()
-        return Species(name=name.value, initial=initial, span=self._span(kw, end))
+        return Species(name=name.value, initial=initial, span=self._span(kw, end),
+                       has_init=end is not name)
 
     def parse_side(self, terminator: str) -> list[SpeciesRef]:
         # An empty side (source `-> A` or sink `A ->`) is allowed: it ends

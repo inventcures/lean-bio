@@ -67,3 +67,48 @@ def test_unused_param_warning():
 def test_duplicate_species():
     src = "model M { species A\n species A }"
     assert "E_DUP_SPECIES" in codes(src)
+
+
+def test_invariant_total_checked_against_initial_state():
+    src = """model M {
+      species A @init 6.0
+      species B @init 4.0
+      reaction r : A -> B @mass_action(k)
+      param k in [1.0, 2.0] @assumed
+      invariant t : A + B = 20.0
+    }"""
+    assert "E_INVARIANT_INIT_MISMATCH" in codes(src)
+    assert "E_INVARIANT_INIT_MISMATCH" not in codes(src.replace("20.0", "10.0"))
+
+
+def test_invariant_without_init_is_flagged_unanchored():
+    src = """model M {
+      species A
+      species B
+      reaction r : A -> B @mass_action(k)
+      param k in [1.0, 2.0] @assumed
+      invariant t : A + B = 1.0
+    }"""
+    assert "W_INVARIANT_UNANCHORED" in codes(src)
+
+
+def test_negative_total_rejected():
+    src = """model M {
+      species A
+      species B
+      reaction r : A -> B @mass_action(k)
+      param k in [1.0, 2.0] @assumed
+      invariant t : A + B = -1.0
+    }"""
+    assert "E_NEGATIVE_TOTAL" in codes(src)
+
+
+def test_repeated_invariant_term_warns():
+    src = """model M {
+      species A @init 1.0
+      species B @init 0.0
+      reaction r : A -> B @mass_action(k)
+      param k in [1.0, 2.0] @assumed
+      invariant t : A + A + B = 2.0
+    }"""
+    assert "W_REPEATED_TERM" in codes(src)

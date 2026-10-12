@@ -77,13 +77,26 @@ def classify(model: Model) -> ReversiblePattern:
 
     M = None
     for inv in model.invariants:
-        terms = {t.species: t.coeff for t in inv.terms}
+        terms: dict[str, Fraction] = {}
+        for t in inv.terms:  # `A + A + B` is 2A + B, not A + B
+            terms[t.species] = terms.get(t.species, Fraction(0)) + exact(t.coeff)
         if set(terms) == {sp_a, sp_b} and terms[sp_a] == 1 and terms[sp_b] == 1:
             M = exact(inv.rhs)
             break
     if M is None:
         raise Unsupported("MissingConservationLaw",
                           f"need an invariant {sp_a} + {sp_b} = M")
+
+    init = {s.name: s for s in model.species}
+    if init[sp_a].has_init and init[sp_b].has_init:
+        if exact(init[sp_a].initial) + exact(init[sp_b].initial) != M:
+            raise Unsupported("InconsistentConservationLaw",
+                              f"{sp_a} + {sp_b} = {M} contradicts the initial "
+                              f"state; the certified bounds would describe "
+                              f"unreachable states")
+    if M < 0:
+        raise Unsupported("InconsistentConservationLaw",
+                          f"total {M} is negative")
 
     pmap = {p.name: p for p in model.params}
     if kf not in pmap or kr not in pmap:

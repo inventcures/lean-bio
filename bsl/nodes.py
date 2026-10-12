@@ -97,6 +97,7 @@ class Species:
     name: str
     initial: float
     span: Span
+    has_init: bool = False   # True when `@init` was written explicitly
 
 
 @dataclass
