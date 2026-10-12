@@ -310,12 +310,28 @@ class _Parser:
 def parse(text: str, name: str = "<string>") -> Model:
     src = Source.from_text(name, text)
     toks = tokenize(text)
-    return _Parser(toks, src).parse_model()
+    parser = _Parser(toks, src)
+    model = parser.parse_model()
+    # The source hash covers the whole file, so nothing may follow the model:
+    # trailing declarations would be hashed as evidence yet silently ignored.
+    if not parser.at("EOF"):
+        parser._err(f"unexpected {parser._desc(parser.cur)} after the end of "
+                    f"model {model.name!r}")
+    return model
 
 
 def parse_file(path: str | Path) -> Model:
     path = Path(path)
-    # Decode the bytes directly instead of using text-mode I/O.  Text-mode
-    # reads normalize newlines on Windows, which would make source hashes and
-    # byte spans describe different bytes than the submitted artifact.
-    return parse(path.read_bytes().decode("utf-8"), name=path.name)
+    # Decode the raw bytes: text-mode I/O normalizes CRLF/CR to LF on every
+    # platform, so the hash and byte spans would describe different bytes than
+    # the file on disk. The source hash is therefore of the exact file bytes;
+    # `.gitattributes` keeps `*.bsl` byte-identical across checkouts.
+    data = path.read_bytes()
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as e:
+        line = data[:e.start].count(b"\n") + 1
+        col = e.start - (data.rfind(b"\n", 0, e.start) + 1) + 1
+        raise BSLError(f"file is not valid UTF-8 (byte 0x{data[e.start]:02x})",
+                       line, col) from None
+    return parse(text, name=path.name)

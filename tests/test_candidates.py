@@ -75,3 +75,19 @@ def test_lean_emission_has_conservation_theorem():
     assert "def dXdt" in lean
     assert "theorem «enzyme_conservation»" in lean
     assert "ring" in lean
+
+
+def test_file_sink_refuses_mismatched_hash(tmp_path):
+    import pytest
+    model = parse_file(EXAMPLE)
+    source = SourceDoc(model.source.name, model.source.text, "0" * 64)
+    with pytest.raises(ValueError):
+        FileSink().emit(to_list(model), source, tmp_path)
+
+
+def test_file_sink_writes_lf_only(tmp_path):
+    model = parse_file(EXAMPLE)
+    source = SourceDoc(model.source.name, model.source.text, model.source.sha256)
+    FileSink().emit(to_list(model), source, tmp_path)
+    for name in ("candidates.jsonl", "manifest.json"):
+        assert b"\r\n" not in (tmp_path / name).read_bytes()

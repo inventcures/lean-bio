@@ -46,9 +46,11 @@ def tokenize(text: str) -> list[Token]:
     col = 1
 
     def adv(count: int = 1) -> None:
+        # Line breaks are LF, CRLF (counted once) or a lone CR.
         nonlocal i, line, col
         for _ in range(count):
-            if i < n and text[i] == "\n":
+            ch = text[i] if i < n else ""
+            if ch == "\n" or (ch == "\r" and (i + 1 >= n or text[i + 1] != "\n")):
                 line += 1
                 col = 1
             else:
@@ -58,14 +60,14 @@ def tokenize(text: str) -> list[Token]:
     while i < n:
         ch = text[i]
 
-        # whitespace
-        if ch in " \t\r\n":
+        # whitespace (a leading UTF-8 byte-order mark counts as whitespace)
+        if ch in " \t\r\n" or (ch == "\ufeff" and i == 0):
             adv()
             continue
 
-        # comment to end of line
+        # comment to end of line (LF, CRLF or a lone CR)
         if ch == "#":
-            while i < n and text[i] != "\n":
+            while i < n and text[i] not in "\r\n":
                 adv()
             continue
 

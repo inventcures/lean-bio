@@ -14,6 +14,7 @@ the manifest says so explicitly.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -40,12 +41,20 @@ class FileSink:
         out = Path(out_dir)
         (out / "content").mkdir(parents=True, exist_ok=True)
 
-        # SourceDoc.text is already the canonical text used to derive the
-        # recorded SHA-256.  Write its UTF-8 bytes directly so Windows newline
-        # translation cannot change the evidence artifact after hashing.
-        (out / "content" / "source.bsl").write_bytes(source.text.encode("utf-8"))
+        # Write the source's UTF-8 bytes directly (no newline translation), and
+        # refuse to record a hash that does not describe those exact bytes.
+        data = source.text.encode("utf-8")
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != source.sha256:
+            raise ValueError(
+                f"source hash mismatch: SourceDoc says {source.sha256}, the "
+                f"bytes being bundled hash to {actual}"
+            )
+        (out / "content" / "source.bsl").write_bytes(data)
 
-        with (out / "candidates.jsonl").open("w", encoding="utf-8") as f:
+        # newline="\n": the bundle must be byte-identical on every platform.
+        with (out / "candidates.jsonl").open("w", encoding="utf-8",
+                                             newline="\n") as f:
             for rec in candidates:
                 f.write(json.dumps(rec, sort_keys=True, ensure_ascii=False))
                 f.write("\n")
@@ -61,8 +70,8 @@ class FileSink:
             "candidate_counts": {"entities": n_entities, "claims": n_claims},
             "note": _UNSIGNED_NOTE,
         }
-        (out / "manifest.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+        (out / "manifest.json").write_bytes(
+            json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")
         )
 
         return EmitResult(

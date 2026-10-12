@@ -64,3 +64,45 @@ def test_syntax_error_has_position():
     with pytest.raises(BSLError) as exc:
         parse("model M { species }")  # missing species name
     assert exc.value.line == 1
+
+
+def test_trailing_content_after_model_is_an_error():
+    # It used to be ignored while still covered by the source hash.
+    with pytest.raises(BSLError):
+        parse("model M { species A } species B reaction junk")
+
+
+def test_cr_only_line_endings():
+    m = parse("model M {\r  # note\r  species A\r}\r")
+    assert [s.name for s in m.species] == ["A"]
+    assert m.species[0].span.line == 3
+
+
+def test_crlf_lines_counted_once():
+    m = parse("model M {\r\n  species A\r\n}\r\n")
+    assert m.species[0].span.line == 2
+
+
+def test_utf8_bom_accepted_and_hashed(tmp_path):
+    import hashlib
+    data = b"\xef\xbb\xbfmodel M { species A }"
+    f = tmp_path / "bom.bsl"
+    f.write_bytes(data)
+    m = parse_file(f)
+    assert m.source.sha256 == hashlib.sha256(data).hexdigest()
+
+
+def test_invalid_utf8_is_a_bsl_error(tmp_path):
+    f = tmp_path / "bad.bsl"
+    f.write_bytes(b"model M {\n species \xff }")
+    with pytest.raises(BSLError) as e:
+        parse_file(f)
+    assert e.value.line == 2
+
+
+def test_source_hash_is_of_the_exact_file_bytes(tmp_path):
+    import hashlib
+    data = b"model M {\r\n  species A\r\n}\r\n"
+    f = tmp_path / "crlf.bsl"
+    f.write_bytes(data)
+    assert parse_file(f).source.sha256 == hashlib.sha256(data).hexdigest()
